@@ -70,10 +70,12 @@ function loadMetadataWithPages() {
         };
         changed = true;
       } else {
+        /*
         if (metadata[file].createdAt !== stat.mtimeMs) {
           metadata[file].createdAt = stat.mtimeMs;
           changed = true;
         }
+          */
         if (!metadata[file].pages) {
           metadata[file].pages = [file];
           changed = true;
