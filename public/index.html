@@ -161,6 +161,35 @@
   </main>
 </div>
 
-<script src="script.js"></script>
+<script src="script.js">
+// --- リロード対策コード (id="search" を指定版) ---
+
+window.addEventListener('DOMContentLoaded', () => {
+    // 1. URLから ?q=... を取得
+    const params = new URLSearchParams(window.location.search);
+    const savedQuery = params.get('q'); 
+
+    if (savedQuery) {
+        // IDが 'search' の要素を探して値をセット
+        const searchBox = document.getElementById('search');
+        if (searchBox) {
+            searchBox.value = savedQuery; 
+            // ページを開いた瞬間に検索を実行したい場合はここに関数を書く
+            // 例: filterImages(); 
+        }
+    }
+});
+
+// 2. 検索実行時にURLを書き換える関数
+function updateURL(searchText) {
+    if (searchText) {
+        const newUrl = `${window.location.pathname}?q=${encodeURIComponent(searchText)}`;
+        window.history.replaceState(null, '', newUrl);
+    } else {
+        window.history.replaceState(null, '', window.location.pathname);
+    }
+}
+
+</script>
 </body>
 </html>

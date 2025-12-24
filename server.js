@@ -80,6 +80,25 @@ function loadMetadataWithPages() {
           metadata[file].pages = [file];
           changed = true;
         }
+        // tagsが存在しない場合の安全策
+      if (!metadata[file].tags) metadata[file].tags = [];
+
+      const currentTags = metadata[file].tags;
+      // 「タグ未登録」というタグがすでにあるか確認
+      const hasUntaggedLabel = currentTags.some(t => t.name === 'タグ未登録');
+      // 「タグ未登録」以外の「ちゃんとしたタグ」があるか確認
+      const hasRealTags = currentTags.some(t => t.name !== 'タグ未登録');
+
+      if (currentTags.length === 0) {
+        // ケース1: タグが完全に空っぽ → 「タグ未登録」を付与
+        metadata[file].tags.push({ name: 'タグ未登録', type: 'general' });
+        changed = true;
+      } 
+      else if (hasUntaggedLabel && hasRealTags) {
+        // ケース2: 他のタグを付けたのに「タグ未登録」が残ってる → 消す
+        metadata[file].tags = currentTags.filter(t => t.name !== 'タグ未登録');
+        changed = true;
+      }
       }
     }
   } catch (e) {
@@ -173,8 +192,19 @@ app.put('/api/metadata/:title', (req, res) => {
     };
   }
 
-  if (tags !== undefined) metadata[fileName].tags = tags;
+if (tags !== undefined) {
+    // 送られてきたタグの中に「タグ未登録」以外の本物のタグがあるかチェック
+    const hasRealTags = tags.some(t => t.name !== 'タグ未登録');
 
+    if (hasRealTags) {
+      // 本物のタグがあるなら、「タグ未登録」をリストから削除して保存
+      metadata[fileName].tags = tags.filter(t => t.name !== 'タグ未登録');
+    } else {
+      // 本物のタグがない（全消しされた等）なら、そのまま保存
+      // (※次に読み込まれた時に loadMetadataWithPages が「タグ未登録」を復活させます)
+      metadata[fileName].tags = tags;
+    }
+  }
   try {
     fs.writeFileSync(METADATA_PATH, JSON.stringify(metadata, null, 2));
     res.json({ ok: true });
