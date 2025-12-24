@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Local Booru</title>
+  <style>
+    :root {
+      --bg-color: #f0f0f0; --text-color: #333;
+      --tag-copyright: #d0d; --tag-character: #0a0; --tag-artist: #a00; --tag-general: #0073ff; --tag-meta: #f80; --tag-size: #888;
+    }
+    body { font-family: Verdana, sans-serif; background: var(--bg-color); color: var(--text-color); margin: 0; padding-bottom: 40px; }
+    
+    header { background: #006ffa; padding: 10px 20px; color: white; display: flex; align-items: center; gap: 20px; }
+    header h1 { margin: 0; font-size: 1.2em; cursor: pointer; }
+    input#search { padding: 5px; width: 300px; }
+
+    /* ツールバー（上部） */
+    #toolbar { 
+      padding: 10px 20px; 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center; 
+      background: #e0e4f0; 
+      border-bottom: 1px solid #ccc; 
+      height: 40px;
+    }
+    
+    /* 一括操作エリア（普段は隠す） */
+    #bulk-controls { display: none; align-items: center; gap: 10px; margin-left: 15px; }
+    #bulk-controls.active { display: flex; }
+    
+    button { cursor: pointer; padding: 5px 10px; }
+    #mode-btn.active { background: #006ffa; color: white; border: 1px solid #0056b3; }
+
+    /* ギャラリー */
+    #gallery-view { padding: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+    .thumb-card { background: #fff; border: 4px solid transparent; cursor: pointer; height: 200px; overflow: hidden; display: flex; align-items: center; justify-content: center; position: relative; box-sizing: border-box; }
+    .thumb-card img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    
+    /* 選択時のスタイル */
+    .thumb-card.selected { 
+      border-color: #006ffa !important; background: #e6f0ff; border-width: 4px; transform: scale(0.95); transition: all 0.1s;
+    }
+    .thumb-card.selected::after {
+      content: "✔"; position: absolute; top: 5px; right: 5px; background: #006ffa; color: white; width: 30px; height: 30px; 
+      border-radius: 50%; text-align: center; line-height: 30px; font-weight: bold; font-size: 18px; box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+    }
+
+    /* ページネーション（下部中央） */
+    #pagination-container {
+      margin-top: 20px;
+      text-align: center;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 15px;
+      padding-bottom: 20px;
+    }
+
+    /* 詳細画面 */
+    #post-view { display: none; padding: 20px; gap: 20px; align-items: flex-start; }
+    #post-view.active { display: flex; }
+    .sidebar { width: 250px; flex-shrink: 0; font-size: 0.9em; }
+    .tag-section h4 { border-bottom: 1px solid #ccc; color: #555; }
+    .tag-list { list-style: none; padding: 0; }
+    .tag-link { text-decoration: none; font-weight: bold; }
+    .type-copyright { color: var(--tag-copyright); }
+    .type-character { color: var(--tag-character); }
+    .type-artist    { color: var(--tag-artist); }
+    .type-general   { color: var(--tag-general); }
+    .type-meta      { color: var(--tag-meta); }
+    .type-size      { color: var(--tag-size); }
+    .main-content { flex-grow: 1; background: #fff; padding: 20px; border: 1px solid #ccc; text-align: center; }
+    #main-image { max-width: 100%; max-height: 90vh; }
+    .edit-box { background: #eef; padding: 10px; border: 1px solid #ccd; margin-bottom: 20px; }
+
+    @media (max-width: 768px) { #post-view { flex-direction: column; } #toolbar { flex-wrap: wrap; height: auto; padding: 10px; } }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1 onclick="showGallery()">LocalBooru</h1>
+  <input type="text" id="search" placeholder="Search..." oninput="filterImages()" list="tag-suggestions" autocomplete="off">
+  <datalist id="tag-suggestions"></datalist>
+</header>
+
+<div id="toolbar">
+  <div style="display:flex; align-items:center; gap: 15px;">
+    <button id="mode-btn" onclick="toggleSelectionMode()">☑ 選択モード</button>
+    
+<div id="bulk-controls" style="display: none; align-items: center; gap: 10px;">
+  <span id="selected-count" style="font-weight:bold; color:#006ffa; min-width: 50px;">0枚</span>
+  
+  <button onclick="selectAllInPage()" style="font-size:0.9em;">ページ全選択</button>
+  <button onclick="deselectAll()" style="font-size:0.9em;">全解除</button>
+  
+  <span style="border-left: 1px solid #ccc; height: 20px; margin: 0 5px;"></span> <select id="bulk-tag-type" style="padding:4px;">
+    <option value="general">一般</option>
+    <option value="artist">絵師</option>
+    <option value="copyright">作品名</option>
+    <option value="character">キャラ</option>
+    <option value="meta">メタ</option>
+    <option value="size">サイズ</option>
+  </select>
+  
+  <input type="text" id="bulk-tag-name" placeholder="タグ追加..." list="tag-suggestions" style="width:120px; padding:4px;" onkeydown="if(event.key==='Enter') applyBulkTag()">
+  
+  <button onclick="applyBulkTag()" style="background:#006ffa; color:white; border:none; font-weight:bold;">追加</button>
+</div>
+    </div>
+
+  <div>
+    <label for="sort-select">並び順:</label>
+    <select id="sort-select" onchange="changeSort()">
+      <option value="date-desc">追加日 (新しい順)</option>
+      <option value="date-asc">追加日 (古い順)</option>
+      <option value="name-asc">名前 (A-Z)</option>
+      <option value="random">ランダム</option>
+    </select>
+  </div>
+</div>
+
+<div id="gallery-view"></div>
+
+<div id="pagination-container">
+  <button onclick="changePage(-1)">Prev</button>
+  <span id="page-info" style="font-weight:bold;">Page 1 / 1</span>
+  <button onclick="changePage(1)">Next</button>
+</div>
+
+<div id="post-view">
+  <aside class="sidebar">
+    <button onclick="showGallery()" style="width:100%; margin-bottom:15px; padding:8px; cursor:pointer;">← 一覧に戻る</button>
+    <div class="edit-box">
+      <h4>タグ追加</h4>
+      <input type="text" id="new-tag-name" placeholder="タグ名" style="width: 60%" 
+             onkeydown="if(event.key==='Enter') addCurrentTag()" list="tag-suggestions" autocomplete="off">
+      <select id="new-tag-type">
+        <option value="general">一般</option>
+        <option value="artist">絵師</option>
+        <option value="copyright">作品名</option>
+        <option value="character">キャラ</option>
+        <option value="meta">メタ</option>
+        <option value="size">サイズ</option>
+      </select>
+      <button onclick="addCurrentTag()">Add</button>
+    </div>
+    <div id="tag-container"></div>
+    <div style="margin-top:20px; color:#888;">
+      <h4>Statistics</h4>
+      <div>Id: <span id="info-id"></span></div>
+      <div>Date: <span id="info-date"></span></div>
+    </div>
+  </aside>
+
+  <main class="main-content">
+    <div id="image-title" style="margin-bottom:10px; font-weight:bold; color:#555;"></div>
+    <img id="main-image" src="" alt="">
+  </main>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
