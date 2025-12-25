@@ -15,48 +15,46 @@
     header h1 { margin: 0; font-size: 1.2em; cursor: pointer; }
     input#search { padding: 5px; width: 300px; }
 
-    /* ツールバー（上部） */
-    #toolbar { 
-      padding: 10px 20px; 
-      display: flex; 
-      justify-content: space-between; 
-      align-items: center; 
-      background: #e0e4f0; 
-      border-bottom: 1px solid #ccc; 
-      height: 40px;
-    }
-    
-    /* 一括操作エリア（普段は隠す） */
+    /* ツールバー */
+    #toolbar { padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; background: #e0e4f0; border-bottom: 1px solid #ccc; height: 40px; }
     #bulk-controls { display: none; align-items: center; gap: 10px; margin-left: 15px; }
     #bulk-controls.active { display: flex; }
-    
     button { cursor: pointer; padding: 5px 10px; }
     #mode-btn.active { background: #006ffa; color: white; border: 1px solid #0056b3; }
-
+.search-wrapper {
+      position: relative;
+      display: inline-block;
+    }
+    input#search {
+      padding: 5px 30px 5px 5px; /* 右側にボタン用の余白を確保 */
+      width: 300px;
+      box-sizing: border-box; /* paddingを含めた幅計算にする */
+    }
+    .clear-btn {
+      position: absolute;
+      right: 5px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: #999;
+      font-size: 18px;
+      cursor: pointer;
+      display: none; /* 初期状態は非表示 */
+      padding: 0 5px;
+    }
+    .clear-btn:hover {
+      color: #333;
+    }
     /* ギャラリー */
     #gallery-view { padding: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
     .thumb-card { background: #fff; border: 4px solid transparent; cursor: pointer; height: 200px; overflow: hidden; display: flex; align-items: center; justify-content: center; position: relative; box-sizing: border-box; }
     .thumb-card img { max-width: 100%; max-height: 100%; object-fit: contain; }
-    
-    /* 選択時のスタイル */
-    .thumb-card.selected { 
-      border-color: #006ffa !important; background: #e6f0ff; border-width: 4px; transform: scale(0.95); transition: all 0.1s;
-    }
-    .thumb-card.selected::after {
-      content: "✔"; position: absolute; top: 5px; right: 5px; background: #006ffa; color: white; width: 30px; height: 30px; 
-      border-radius: 50%; text-align: center; line-height: 30px; font-weight: bold; font-size: 18px; box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-    }
+    .thumb-card.selected { border-color: #006ffa !important; background: #e6f0ff; border-width: 4px; transform: scale(0.95); transition: all 0.1s; }
+    .thumb-card.selected::after { content: "✔"; position: absolute; top: 5px; right: 5px; background: #006ffa; color: white; width: 30px; height: 30px; border-radius: 50%; text-align: center; line-height: 30px; font-weight: bold; font-size: 18px; box-shadow: 0 2px 5px rgba(0,0,0,0.3); }
 
-    /* ページネーション（下部中央） */
-    #pagination-container {
-      margin-top: 20px;
-      text-align: center;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 15px;
-      padding-bottom: 20px;
-    }
+    /* ページネーション */
+    #pagination-container { margin-top: 20px; text-align: center; display: flex; justify-content: center; align-items: center; gap: 15px; padding-bottom: 20px; }
 
     /* 詳細画面 */
     #post-view { display: none; padding: 20px; gap: 20px; align-items: flex-start; }
@@ -67,50 +65,49 @@
     .tag-link { text-decoration: none; font-weight: bold; }
     .type-copyright { color: var(--tag-copyright); }
     .type-character { color: var(--tag-character); }
-    .type-artist    { color: var(--tag-artist); }
-    .type-general   { color: var(--tag-general); }
-    .type-meta      { color: var(--tag-meta); }
-    .type-size      { color: var(--tag-size); }
+    .type-artist { color: var(--tag-artist); }
+    .type-general { color: var(--tag-general); }
+    .type-meta { color: var(--tag-meta); }
+    .type-size { color: var(--tag-size); }
     .main-content { flex-grow: 1; background: #fff; padding: 20px; border: 1px solid #ccc; text-align: center; }
     #main-image { max-width: 100%; max-height: 90vh; }
     .edit-box { background: #eef; padding: 10px; border: 1px solid #ccd; margin-bottom: 20px; }
 
     @media (max-width: 768px) { #post-view { flex-direction: column; } #toolbar { flex-wrap: wrap; height: auto; padding: 10px; } }
-  </style>
+</style>
 </head>
 <body>
 
 <header>
   <h1 onclick="showGallery()">LocalBooru</h1>
-  <input type="text" id="search" placeholder="Search..." oninput="filterImages()" list="tag-suggestions" autocomplete="off">
+  
+  <div class="search-wrapper">
+    <input type="text" id="search" placeholder="Search..." oninput="filterImages()" list="tag-suggestions" autocomplete="off">
+    <button id="clear-btn" class="clear-btn" onclick="clearSearch()">×</button>
+  </div>
   <datalist id="tag-suggestions"></datalist>
 </header>
 
 <div id="toolbar">
   <div style="display:flex; align-items:center; gap: 15px;">
     <button id="mode-btn" onclick="toggleSelectionMode()">☑ 選択モード</button>
-    
-<div id="bulk-controls" style="display: none; align-items: center; gap: 10px;">
-  <span id="selected-count" style="font-weight:bold; color:#006ffa; min-width: 50px;">0枚</span>
-  
-  <button onclick="selectAllInPage()" style="font-size:0.9em;">ページ全選択</button>
-  <button onclick="deselectAll()" style="font-size:0.9em;">全解除</button>
-  
-  <span style="border-left: 1px solid #ccc; height: 20px; margin: 0 5px;"></span> <select id="bulk-tag-type" style="padding:4px;">
-    <option value="general">一般</option>
-    <option value="artist">絵師</option>
-    <option value="copyright">作品名</option>
-    <option value="character">キャラ</option>
-    <option value="meta">メタ</option>
-    <option value="size">サイズ</option>
-  </select>
-  
-  <input type="text" id="bulk-tag-name" placeholder="タグ追加..." list="tag-suggestions" style="width:120px; padding:4px;" onkeydown="if(event.key==='Enter') applyBulkTag()">
-  
-  <button onclick="applyBulkTag()" style="background:#006ffa; color:white; border:none; font-weight:bold;">追加</button>
-</div>
+    <div id="bulk-controls" style="display: none; align-items: center; gap: 10px;">
+      <span id="selected-count" style="font-weight:bold; color:#006ffa; min-width: 50px;">0枚</span>
+      <button onclick="selectAllInPage()" style="font-size:0.9em;">ページ全選択</button>
+      <button onclick="deselectAll()" style="font-size:0.9em;">全解除</button>
+      <span style="border-left: 1px solid #ccc; height: 20px; margin: 0 5px;"></span> 
+      <select id="bulk-tag-type" style="padding:4px;">
+        <option value="general">一般</option>
+        <option value="artist">絵師</option>
+        <option value="copyright">出典</option>
+        <option value="character">キャラクター</option>
+        <option value="meta">メタ</option>
+        <option value="size">サイズ</option>
+      </select>
+      <input type="text" id="bulk-tag-name" placeholder="タグ追加..." list="tag-suggestions" style="width:120px; padding:4px;" onkeydown="if(event.key==='Enter') applyBulkTag()">
+      <button onclick="applyBulkTag()" style="background:#006ffa; color:white; border:none; font-weight:bold;">追加</button>
     </div>
-
+  </div>
   <div>
     <label for="sort-select">並び順:</label>
     <select id="sort-select" onchange="changeSort()">
@@ -161,35 +158,6 @@
   </main>
 </div>
 
-<script src="script.js">
-// --- リロード対策コード (id="search" を指定版) ---
-
-window.addEventListener('DOMContentLoaded', () => {
-    // 1. URLから ?q=... を取得
-    const params = new URLSearchParams(window.location.search);
-    const savedQuery = params.get('q'); 
-
-    if (savedQuery) {
-        // IDが 'search' の要素を探して値をセット
-        const searchBox = document.getElementById('search');
-        if (searchBox) {
-            searchBox.value = savedQuery; 
-            // ページを開いた瞬間に検索を実行したい場合はここに関数を書く
-            // 例: filterImages(); 
-        }
-    }
-});
-
-// 2. 検索実行時にURLを書き換える関数
-function updateURL(searchText) {
-    if (searchText) {
-        const newUrl = `${window.location.pathname}?q=${encodeURIComponent(searchText)}`;
-        window.history.replaceState(null, '', newUrl);
-    } else {
-        window.history.replaceState(null, '', window.location.pathname);
-    }
-}
-
-</script>
+<script src="script.js"></script>
 </body>
 </html>

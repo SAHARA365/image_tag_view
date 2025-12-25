@@ -13,18 +13,53 @@ let selectedItems = new Set();
 
 // タグ設定
 const TAG_ORDER = ['copyright', 'character', 'artist', 'general', 'meta', 'size'];
-const TAG_LABELS = { copyright: '作品名', character: 'キャラ', artist: '絵師', general: '一般', meta: 'メタ', size: 'サイズ' };
+const TAG_LABELS = { copyright: '出典', character: 'キャラクター', artist: '絵師', general: '一般', meta: 'メタ', size: 'サイズ' };
+const UNTAGGED_LABEL = 'タグ未登録'; 
 
-window.onload = async () => {
+// ----------------------------------------------------
+// 初期化・URL管理
+// ----------------------------------------------------
+
+window.addEventListener('DOMContentLoaded', async () => {
+  // 1. URLパラメータの復元 (リロード対策)
+  const params = new URLSearchParams(window.location.search);
+  const savedQuery = params.get('q');
+  const searchInput = document.getElementById('search');
+
+  if (savedQuery && searchInput) {
+      searchInput.value = savedQuery;
+  }
+
+  const updateClearBtn = () => {
+      const btn = document.getElementById('clear-btn');
+      if (btn && searchInput) {
+          btn.style.display = searchInput.value.length > 0 ? 'block' : 'none';
+      }
+  };
+
+if (searchInput) {
+    // ページ読み込み時に一度チェック（更新などで文字が残っている場合のため）
+    updateClearBtn(); 
+
+    searchInput.addEventListener('input', (e) => {
+      const val = e.target.value;
+      updateURLState(val);
+      filterImages();
+      updateClearBtn(); // ★この1行が抜けていました！これを追加
+    });
+  }
+
+  // 2. データのロード
   await loadData();
   updateTagList();
   
+  // 3. 状態の復元
   if (window.location.hash.startsWith('#post=')) {
     handleHashChange();
   } else {
     applyFilterAndSort();
   }
-};
+});
 
 window.onpopstate = () => handleHashChange();
 
@@ -39,6 +74,16 @@ function handleHashChange() {
   }
 }
 
+function updateURLState(searchText) {
+  const url = new URL(window.location);
+  if (searchText) {
+    url.searchParams.set('q', searchText);
+  } else {
+    url.searchParams.delete('q');
+  }
+  window.history.replaceState(null, '', url);
+}
+
 async function loadData() {
   try {
     const res = await fetch('/api/metadata');
@@ -47,105 +92,19 @@ async function loadData() {
       .filter(item => item && typeof item === 'object' && item.title)
       .sort((a, b) => b.createdAt - a.createdAt);
     displayData = [...allData];
-  } catch (e) { console.error(e); }
+  } catch (e) { 
+    console.error('Data load failed:', e); 
+    alert('データの読み込みに失敗しました。ログインしていますか？');
+  }
 }
 
 // ----------------------------------------------------
-// 選択モード・一括操作
-// ----------------------------------------------------
-
-function toggleSelectionMode() {
-  // 1. フラグを反転
-  isSelectionMode = !isSelectionMode;
-  selectedItems.clear();
-  
-  const btn = document.getElementById('mode-btn');
-  const controls = document.getElementById('bulk-controls');
-
-  // 2. 状態に合わせて表示/非表示を切り替え
-  if (isSelectionMode) {
-    btn.classList.add('active');
-    btn.innerText = "☑ 終了";
-    // ★ここで確実に表示
-    if(controls) controls.style.display = 'flex'; 
-  } else {
-    btn.classList.remove('active');
-    btn.innerText = "☑ 選択モード";
-    // ★ここで確実に非表示
-    if(controls) controls.style.display = 'none';
-  }
-  
-  const countSpan = document.getElementById('selected-count');
-  if(countSpan) countSpan.innerText = "0枚";
-
-  // 3. 最後にギャラリー（画像枠線など）を更新
-  renderGalleryView();
-}
-
-function toggleItemSelection(title) {
-  if (selectedItems.has(title)) {
-    selectedItems.delete(title);
-  } else {
-    selectedItems.add(title);
-  }
-  updateBulkPanel();
-  renderGalleryView();
-}
-
-function updateBulkPanel() {
-  const countSpan = document.getElementById('selected-count');
-  if (countSpan) {
-    countSpan.innerText = `${selectedItems.size}枚`;
-  }
-}
-
-function cancelSelection() {
-  selectedItems.clear();
-  updateBulkPanel();
-  renderGalleryView();
-}
-
-async function applyBulkTag() {
-  const nameInput = document.getElementById('bulk-tag-name');
-  const typeInput = document.getElementById('bulk-tag-type');
-  const tagName = nameInput.value.trim();
-  const tagType = typeInput.value;
-
-  if (!tagName || selectedItems.size === 0) return;
-
-  // ▼▼▼ 修正：確認ダイアログ（confirm）を削除しました ▼▼▼
-  // if (!confirm(...)) return;  <-- この行を消しました
-  // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-
-  for (const title of selectedItems) {
-    const item = allData.find(d => d.title === title);
-    if (!item) continue;
-    
-    const currentTags = (item.tags || []).map(t => typeof t === 'string' ? t : t.name);
-    if (!currentTags.includes(tagName)) {
-      const newTags = (item.tags || []).map(t => typeof t === 'string' ? { name: t, type: 'general' } : t);
-      newTags.push({ name: tagName, type: tagType });
-      item.tags = newTags;
-      await saveMetadata(item);
-    }
-  }
-
-  // 完了メッセージ（もしこれも邪魔なら alert の行を消してください）
-  alert('完了しました！');
-  
-  nameInput.value = '';
-  selectedItems.clear(); // 選択解除
-  updateBulkPanel();
-  renderGalleryView();
-  updateTagList();
-}
-
-// ----------------------------------------------------
-// コアロジック
+// コアロジック (フィルタ・ソート)
 // ----------------------------------------------------
 
 function applyFilterAndSort() {
-  const keyword = document.getElementById('search').value.toLowerCase();
+  const searchBox = document.getElementById('search');
+  const keyword = searchBox ? searchBox.value.toLowerCase() : '';
   const sortMode = document.getElementById('sort-select').value;
 
   let filtered = allData.filter(item => {
@@ -166,8 +125,11 @@ function applyFilterAndSort() {
 
 function changeSort() { applyFilterAndSort(); }
 function filterImages() { applyFilterAndSort(); }
+
 function searchTag(tagName) {
-  document.getElementById('search').value = tagName;
+  const searchBox = document.getElementById('search');
+  searchBox.value = tagName;
+  updateURLState(tagName);
   if (window.location.hash) history.pushState(null, null, ' ');
   applyFilterAndSort();
 }
@@ -183,7 +145,7 @@ function changePage(delta) {
 }
 
 // ----------------------------------------------------
-// 表示関連
+// 表示関連 (ギャラリー)
 // ----------------------------------------------------
 
 function showGallery() {
@@ -199,14 +161,8 @@ function renderGalleryView() {
   const pgContainer = document.getElementById('pagination-container');
   if(pgContainer) pgContainer.style.display = 'flex';
   
-  // ▼▼▼ ★復活させる部分★ ▼▼▼
-  // 画面を描き直すたびに、選択モードなら強制的に「表示」、違うなら「非表示」にします。
-  // これで確実に状態が維持されます。
   const bulkControls = document.getElementById('bulk-controls');
-  if (bulkControls) {
-      bulkControls.style.display = isSelectionMode ? 'flex' : 'none';
-  }
-  // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+  if (bulkControls) bulkControls.style.display = isSelectionMode ? 'flex' : 'none';
 
   const container = document.getElementById('gallery-view');
   container.innerHTML = '';
@@ -220,22 +176,40 @@ function renderGalleryView() {
   pageItems.forEach(item => {
     const div = document.createElement('div');
     div.className = 'thumb-card';
-    
-    if (selectedItems.has(item.title)) {
-      div.classList.add('selected');
-    }
+    if (selectedItems.has(item.title)) div.classList.add('selected');
 
+    // ★修正: サーバーのAPIエンドポイントに合わせてURL生成
     const imgUrl = `/api/cover-image?folder=${encodeURIComponent(item.title)}`;
-    div.innerHTML = `<img src="${imgUrl}" loading="lazy">`;
     
-    div.onclick = () => {
+const postHash = `#post=${encodeURIComponent(item.title)}`;
+    
+    div.innerHTML = `
+      <a href="${postHash}" class="thumb-link" style="display:flex; width:100%; height:100%; align-items:center; justify-content:center; text-decoration:none;">
+        <img src="${imgUrl}" loading="lazy" onerror="this.src=''; this.alt='No Image'" style="max-width:100%; max-height:100%;">
+      </a>
+    `;
+    
+    // リンク要素を取得
+    const link = div.querySelector('a');
+
+    // クリックイベントの制御
+    link.addEventListener('click', (e) => {
+      // CtrlキーやCommandキーが押されている場合（別タブ希望）は
+      // Javascriptで妨害せず、ブラウザ標準の動作（別タブで開く）に任せる
+      if (e.ctrlKey || e.metaKey) return;
+
+      // 通常の左クリックの場合は、ページ遷移（リロード）を防ぐ
+      e.preventDefault();
+
+      // 選択モードか、通常遷移かで分岐
       if (isSelectionMode) {
+        // 親のdivの見た目を変えるために toggleItemSelection を呼ぶ
         toggleItemSelection(item.title);
       } else {
         openPost(item);
       }
-    };
-    
+    });
+
     container.appendChild(div);
   });
 }
@@ -249,9 +223,7 @@ function renderPostView(item) {
   currentItem = item;
   document.getElementById('gallery-view').style.display = 'none';
   document.getElementById('toolbar').style.display = 'none';
-  
-  const pgContainer = document.getElementById('pagination-container');
-  if(pgContainer) pgContainer.style.display = 'none';
+  document.getElementById('pagination-container').style.display = 'none';
   
   const postView = document.getElementById('post-view');
   postView.classList.add('active');
@@ -270,12 +242,26 @@ function renderPostView(item) {
 }
 
 // ----------------------------------------------------
-// タグ管理関連
+// タグ管理関連 (サイドバー)
 // ----------------------------------------------------
 
 function renderSidebarTags(item) {
   const container = document.getElementById('tag-container');
   container.innerHTML = '';
+
+  // ★追加: 一括削除ボタンエリア
+  const controlDiv = document.createElement('div');
+  controlDiv.style.marginBottom = '15px';
+  controlDiv.style.borderBottom = '1px solid #eee';
+  controlDiv.style.paddingBottom = '10px';
+  controlDiv.innerHTML = `
+    <button id="btn-bulk-delete" onclick="deleteSelectedTags()" disabled 
+            style="width:100%; background:#d9534f; color:white; border:none; padding:8px; border-radius:4px; opacity:0.5; cursor:not-allowed;">
+      選択したタグを削除 (0)
+    </button>
+  `;
+  container.appendChild(controlDiv);
+
   const normalizedTags = (item.tags || []).map(t => typeof t === 'string' ? { name: t, type: 'general' } : t);
   const groups = { copyright: [], character: [], artist: [], general: [], meta: [], size: [] };
   
@@ -293,17 +279,28 @@ function renderSidebarTags(item) {
     ul.className = 'tag-list';
     
     groups[type].forEach(tagObj => {
+      // カウント計算
       let count = 0;
       allData.forEach(d => {
         const dTags = (d.tags || []).map(dt => typeof dt === 'string' ? dt : dt.name);
         if (dTags.includes(tagObj.name)) count++;
       });
+
       const li = document.createElement('li');
+      li.style.display = 'flex';
+      li.style.alignItems = 'center';
+      li.style.marginBottom = '4px';
+
+      // ★追加: チェックボックス
       li.innerHTML = `
-        <a href="#" class="tag-link type-${type}" onclick="searchTag('${tagObj.name}'); return false;">
-          ? ${tagObj.name} <span style="color:#888; font-size:0.8em;">(${count})</span>
-        </a>
-        <span class="remove-btn" onclick="removeTag('${tagObj.name}')">×</span>
+        <label style="display:flex; align-items:center; cursor:pointer; flex-grow:1;">
+          <input type="checkbox" class="tag-selector" value="${tagObj.name}" 
+                 onchange="updateDeleteButtonState()" style="margin-right:6px;">
+          <a href="#" class="tag-link type-${type}" onclick="searchTag('${tagObj.name}'); return false;" style="pointer-events: auto;">
+            ${tagObj.name} <span style="color:#888; font-size:0.8em;">(${count})</span>
+          </a>
+        </label>
+        <span class="remove-btn" onclick="removeTag('${tagObj.name}')" style="margin-left:5px; cursor:pointer;">×</span>
       `;
       ul.appendChild(li);
     });
@@ -312,6 +309,39 @@ function renderSidebarTags(item) {
   });
 }
 
+function updateDeleteButtonState() {
+   const checkboxes = document.querySelectorAll('.tag-selector:checked');
+   const btn = document.getElementById('btn-bulk-delete');
+   const count = checkboxes.length;
+   if (count > 0) {
+     btn.disabled = false;
+     btn.style.opacity = '1';
+     btn.style.cursor = 'pointer';
+     btn.innerText = `選択したタグを削除 (${count})`;
+   } else {
+     btn.disabled = true;
+     btn.style.opacity = '0.5';
+     btn.style.cursor = 'not-allowed';
+     btn.innerText = `選択したタグを削除 (0)`;
+   }
+}
+
+async function deleteSelectedTags() {
+  if(!currentItem) return;
+  const checkboxes = document.querySelectorAll('.tag-selector:checked');
+  if(checkboxes.length === 0) return;
+  if(!confirm(`選択した ${checkboxes.length} 個のタグを削除しますか？`)) return;
+
+  const targets = Array.from(checkboxes).map(c => c.value);
+  currentItem.tags = (currentItem.tags || []).filter(t => {
+     const tName = typeof t === 'string' ? t : t.name;
+     return !targets.includes(tName);
+  });
+  await saveMetadata(currentItem);
+  renderSidebarTags(currentItem); 
+}
+
+// 個別タグ追加・削除
 async function addCurrentTag() {
   const nameInput = document.getElementById('new-tag-name');
   const typeInput = document.getElementById('new-tag-type');
@@ -322,7 +352,10 @@ async function addCurrentTag() {
   const currentTags = (currentItem.tags || []).map(t => typeof t === 'string' ? t : t.name);
   if (currentTags.includes(name)) { alert('既に登録されています'); return; }
 
-  const newTags = (currentItem.tags || []).map(t => typeof t === 'string' ? { name: t, type: 'general' } : t);
+  let newTags = (currentItem.tags || []).map(t => typeof t === 'string' ? { name: t, type: 'general' } : t);
+  if (name !== UNTAGGED_LABEL) {
+    newTags = newTags.filter(t => t.name !== UNTAGGED_LABEL);
+  }
   newTags.push({ name: name, type: type });
   currentItem.tags = newTags;
   
@@ -368,63 +401,92 @@ function updateTagList() {
   });
 }
 
-// ▼▼▼ 新規追加：ページ内全選択 ▼▼▼
-function selectAllInPage() {
-  // 現在表示中のページの範囲を計算
-  const start = (currentPage - 1) * ITEMS_PER_PAGE;
-  const end = start + ITEMS_PER_PAGE;
-  const pageItems = displayData.slice(start, end);
-  
-  // そのページのアイテムだけを選択状態に追加
-  pageItems.forEach(item => selectedItems.add(item.title));
-  
+// ----------------------------------------------------
+// 一括操作関連 (ギャラリー画面)
+// ----------------------------------------------------
+
+function toggleSelectionMode() {
+  isSelectionMode = !isSelectionMode;
+  selectedItems.clear();
+  const btn = document.getElementById('mode-btn');
+  const controls = document.getElementById('bulk-controls');
+  if (isSelectionMode) {
+    btn.classList.add('active');
+    btn.innerText = "☑ 終了";
+    if(controls) controls.style.display = 'flex'; 
+  } else {
+    btn.classList.remove('active');
+    btn.innerText = "☑ 選択モード";
+    if(controls) controls.style.display = 'none';
+  }
+  document.getElementById('selected-count').innerText = "0枚";
+  renderGalleryView();
+}
+
+function toggleItemSelection(title) {
+  if (selectedItems.has(title)) selectedItems.delete(title);
+  else selectedItems.add(title);
   updateBulkPanel();
   renderGalleryView();
 }
 
-// ▼▼▼ 新規追加：全解除 ▼▼▼
+function updateBulkPanel() {
+  document.getElementById('selected-count').innerText = `${selectedItems.size}枚`;
+}
+
+function selectAllInPage() {
+  const start = (currentPage - 1) * ITEMS_PER_PAGE;
+  const end = start + ITEMS_PER_PAGE;
+  const pageItems = displayData.slice(start, end);
+  pageItems.forEach(item => selectedItems.add(item.title));
+  updateBulkPanel();
+  renderGalleryView();
+}
+
 function deselectAll() {
   selectedItems.clear();
   updateBulkPanel();
   renderGalleryView();
 }
 
-// ▼▼▼ 修正：タグ追加（選択維持＆アラート削除） ▼▼▼
 async function applyBulkTag() {
   const nameInput = document.getElementById('bulk-tag-name');
   const typeInput = document.getElementById('bulk-tag-type');
   const tagName = nameInput.value.trim();
   const tagType = typeInput.value;
-
   if (!tagName || selectedItems.size === 0) return;
 
-  // 確認ダイアログなし
-  
   for (const title of selectedItems) {
     const item = allData.find(d => d.title === title);
     if (!item) continue;
     
     const currentTags = (item.tags || []).map(t => typeof t === 'string' ? t : t.name);
     if (!currentTags.includes(tagName)) {
-      const newTags = (item.tags || []).map(t => typeof t === 'string' ? { name: t, type: 'general' } : t);
+      let newTags = (item.tags || []).map(t => typeof t === 'string' ? { name: t, type: 'general' } : t);
+      if (tagName !== UNTAGGED_LABEL) {
+        newTags = newTags.filter(t => t.name !== UNTAGGED_LABEL);
+      }
       newTags.push({ name: tagName, type: tagType });
       item.tags = newTags;
       await saveMetadata(item);
     }
   }
-
-  // ★変更点：完了アラート削除、選択解除（clear）もしない
-  // alert('完了しました！'); // ← 削除
-  
   nameInput.value = '';
-  // selectedItems.clear(); // ← 削除（選択状態をキープ！）
-  
   updateBulkPanel();
-  renderGalleryView(); // 枠線はそのままで、内部データ（タグ）だけ更新された状態を表示
+  renderGalleryView();
   updateTagList();
-  
-  // 入力欄にフォーカスを戻して、すぐ次のタグを打てるようにする
-  nameInput.focus();
 }
 
-// ※古い cancelSelection 関数がもし残っていても、ボタンから呼ばれなくなるのでそのままで大丈夫です。
+function clearSearch() {
+  const searchInput = document.getElementById('search');
+  if (searchInput) {
+      searchInput.value = '';        // 入力を空にする
+      searchInput.focus();           // フォーカスを戻す
+      updateURLState('');            // URLのクエリを削除
+      filterImages();                // 全件表示に戻す
+      
+      // ボタンを非表示にする
+      const btn = document.getElementById('clear-btn');
+      if (btn) btn.style.display = 'none';
+  }
+}

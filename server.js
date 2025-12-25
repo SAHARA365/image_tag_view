@@ -1,21 +1,27 @@
-// server.js — 画像直置き（1枚絵管理）＆フォルダ分け不要の完全版 + ログイン機能
+// server.js — 最終デバッグ版
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const cookieParser = require('cookie-parser');
-// ★追加: セッション管理と認証ミドルウェア
 const session = require('express-session');
-const authMiddleware = require('./auth'); 
 
-const app = express();
+const app = express(); // ★ここで app を作成（これより前で app.use してはいけません）
+
+// ▼▼▼ 全アクセス監視ログ（ここなら大丈夫です） ▼▼▼
+app.use((req, res, next) => {
+  // 画像以外のアクセスも全て表示して、接続を確認する
+  if (!req.url.startsWith('/images/')) {
+      console.log(`[アクセスあり] ${req.method} ${req.url}`);
+  }
+  next();
+});
+// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 // ▼▼▼ 設定エリア ▼▼▼
-// 好きなパスワードに変更してください
 const MY_PASSWORD = '1hiedaAQ'; 
-const SESSION_SECRET = 'secret_key_image_tag_view'; // 適当な文字列
-
+const SESSION_SECRET = 'secret_key_image_tag_view'; 
 const METADATA_PATH = path.join(__dirname, 'metadata.json');
-const IMAGES_DIR = path.join(__dirname, 'images');
+const IMAGES_DIR = path.join(__dirname, 'images'); // 画像フォルダの場所
 // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 // .avif 用 MIME
@@ -24,7 +30,7 @@ try {
   if (m?.define) m.define({ 'image/avif': ['avif'] }, true);
 } catch { console.warn('[mime] init skipped'); }
 
-// ---- metadata 構築（変更なし）----
+// ---- metadata 構築 ----
 function loadMetadataWithPages() {
   let metadata = {};
   try {
@@ -34,11 +40,11 @@ function loadMetadataWithPages() {
   } catch { metadata = {}; }
 
   let changed = false;
-
   try {
     if (!fs.existsSync(IMAGES_DIR)) {
-      console.warn(`[warn] images folder not found at: ${IMAGES_DIR}`);
-      return metadata;
+        // 画像フォルダが無い場合は警告を出す
+        console.error(`[致命的エラー] 画像フォルダが見つかりません: ${IMAGES_DIR}`);
+        return metadata;
     }
 
     const files = fs.readdirSync(IMAGES_DIR)
@@ -46,221 +52,133 @@ function loadMetadataWithPages() {
       .sort((a, b) => a.localeCompare(b, 'ja'));
 
     for (const key of Object.keys(metadata)) {
-      if (!files.includes(key)) {
-        delete metadata[key];
+      if (!files.includes(key)) { delete metadata[key]; changed = true; }
+    }
+    for (const file of files) {
+      if (!metadata[file]) {
+        metadata[file] = { title: file, pages: [file], createdAt: fs.statSync(path.join(IMAGES_DIR, file)).mtimeMs, tags: [] };
         changed = true;
       }
-    }
-
-    for (const file of files) {
-      const filePath = path.join(IMAGES_DIR, file);
-      let stat;
-      try { stat = fs.statSync(filePath); } catch { continue; }
-
-      if (!metadata[file]) {
-        metadata[file] = {
-          title: file,
-          pages: [file],
-          createdAt: stat.mtimeMs,
-          __sortMs: stat.mtimeMs + Math.random(),
-          author: "",
-          genre: [],
-          tags: [],
-          format: ""
-        };
-        changed = true;
-      } else {
-        /*
-        if (metadata[file].createdAt !== stat.mtimeMs) {
-          metadata[file].createdAt = stat.mtimeMs;
-          changed = true;
-        }
-          */
-        if (!metadata[file].pages) {
-          metadata[file].pages = [file];
-          changed = true;
-        }
-        // tagsが存在しない場合の安全策
       if (!metadata[file].tags) metadata[file].tags = [];
-
-      const currentTags = metadata[file].tags;
-      // 「タグ未登録」というタグがすでにあるか確認
-      const hasUntaggedLabel = currentTags.some(t => t.name === 'タグ未登録');
-      // 「タグ未登録」以外の「ちゃんとしたタグ」があるか確認
-      const hasRealTags = currentTags.some(t => t.name !== 'タグ未登録');
-
-      if (currentTags.length === 0) {
-        // ケース1: タグが完全に空っぽ → 「タグ未登録」を付与
+      const hasUntagged = metadata[file].tags.some(t => t.name === 'タグ未登録');
+      const hasReal = metadata[file].tags.some(t => t.name !== 'タグ未登録');
+      if (metadata[file].tags.length === 0) {
         metadata[file].tags.push({ name: 'タグ未登録', type: 'general' });
         changed = true;
-      } 
-      else if (hasUntaggedLabel && hasRealTags) {
-        // ケース2: 他のタグを付けたのに「タグ未登録」が残ってる → 消す
-        metadata[file].tags = currentTags.filter(t => t.name !== 'タグ未登録');
+      } else if (hasUntagged && hasReal) {
+        metadata[file].tags = metadata[file].tags.filter(t => t.name !== 'タグ未登録');
         changed = true;
       }
-      }
     }
-  } catch (e) {
-    console.error('[metadata] build error:', e);
-  }
+  } catch (e) { console.error('[metadata] build error:', e); }
 
-  if (changed) {
-    try {
-      fs.writeFileSync(METADATA_PATH, JSON.stringify(metadata, null, 2));
-    } catch (e) {
-      console.error('[metadata] Save failed:', e);
-    }
-  }
-
+  if (changed) fs.writeFileSync(METADATA_PATH, JSON.stringify(metadata, null, 2));
   return metadata;
 }
-
 
 // ===== ミドルウェア設定 =====
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-
-// ★追加: セッション設定
 app.use(session({
     secret: SESSION_SECRET,
     resave: false,
-    saveUninitialized: true
+    saveUninitialized: false,
+    cookie: { httpOnly: true } 
 }));
 
-// ===== ログイン・認証ルート（ここは認証なしでアクセス可能にする） =====
+// ===== 認証チェック関数 =====
+const checkAuth = (req, res, next) => {
+    if (req.session.isLoggedIn) {
+        return next();
+    }
+    res.redirect('/login');
+};
 
-// ログイン画面の表示
+// ===== 認証不要エリア =====
 app.get('/login', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public/login.html'));
+    const loginPage = path.join(__dirname, 'public/login.html');
+    if (fs.existsSync(loginPage)) {
+        res.sendFile(loginPage);
+    } else {
+        res.status(404).send('public/login.html が見つかりません');
+    }
 });
 
-// ログイン処理
 app.post('/login', (req, res) => {
     if (req.body.password === MY_PASSWORD) {
         req.session.isLoggedIn = true;
-        res.redirect('/');
+        req.session.save(() => res.redirect('/'));
     } else {
         res.redirect('/login?error=1');
     }
 });
 
-// ログアウト処理
 app.get('/logout', (req, res) => {
     req.session.destroy();
     res.redirect('/login');
 });
 
+// ★★★ ここから認証必須 ★★★
+app.use(checkAuth);
 
-// ★重要: ここから下に認証ガードをかける
-// これ以降に書かれた API や静的ファイルはログインしていないとアクセスできません
-app.use(authMiddleware);
+// ===== API =====
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-
-// ===== 以下、メイン機能（認証が必要） =====
-
-// Health Check
-app.get('/api/health', (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  res.json({ status: 'ok', timestamp: Date.now() });
-});
-
-// Metadata返却
 app.get('/api/metadata', (_req, res) => {
   res.set('Cache-Control', 'no-store');
-  const data = loadMetadataWithPages();
-  res.json({ __api: 'ok', __generatedAt: Date.now(), ...data });
+  res.json({ ...loadMetadataWithPages() });
 });
 
-// タグ更新 API
 app.put('/api/metadata/:title', (req, res) => {
   const fileName = req.params.title;
   const { tags } = req.body;
-
-  let metadata = {};
-  if (fs.existsSync(METADATA_PATH)) {
-    try {
-      metadata = JSON.parse(fs.readFileSync(METADATA_PATH, 'utf8') || '{}');
-    } catch { metadata = {}; }
-  }
-
-  if (!metadata[fileName]) {
-    metadata[fileName] = { 
-      title: fileName, pages: [fileName], 
-      createdAt: Date.now(), tags: [] 
-    };
-  }
-
-if (tags !== undefined) {
-    // 送られてきたタグの中に「タグ未登録」以外の本物のタグがあるかチェック
-    const hasRealTags = tags.some(t => t.name !== 'タグ未登録');
-
-    if (hasRealTags) {
-      // 本物のタグがあるなら、「タグ未登録」をリストから削除して保存
-      metadata[fileName].tags = tags.filter(t => t.name !== 'タグ未登録');
-    } else {
-      // 本物のタグがない（全消しされた等）なら、そのまま保存
-      // (※次に読み込まれた時に loadMetadataWithPages が「タグ未登録」を復活させます)
-      metadata[fileName].tags = tags;
-    }
-  }
-  try {
-    fs.writeFileSync(METADATA_PATH, JSON.stringify(metadata, null, 2));
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('[metadata] Save failed:', e);
-    res.status(500).json({ ok: false });
+  let metadata = loadMetadataWithPages();
+  if (metadata[fileName]) {
+     if (tags) {
+        const hasReal = tags.some(t => t.name !== 'タグ未登録');
+        metadata[fileName].tags = hasReal ? tags.filter(t => t.name !== 'タグ未登録') : tags;
+     }
+     fs.writeFileSync(METADATA_PATH, JSON.stringify(metadata, null, 2));
+     res.json({ ok: true });
+  } else {
+     res.status(404).json({ ok: false });
   }
 });
 
-// 画像URL取得用
+// ▼▼▼ 画像取得API (詳細診断ログ付き) ▼▼▼
 app.get('/api/cover-image', (req, res) => {
   const fileName = String(req.query?.folder || req.query?.title || '');
-  if (!fileName) return res.status(404).send('Not Found');
+  if (!fileName) return res.status(404).send('No Filename');
 
-  const filePath = path.join(IMAGES_DIR, fileName);
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).send('Not Found');
+  const safeName = path.basename(fileName);
+  const filePath = path.join(IMAGES_DIR, safeName);
+
+  // ★ここで黒い画面に報告します
+  console.log(`[画像読込] ${safeName} を探します`);
+  console.log(`   └─ 場所: ${filePath}`);
+
+  if (fs.existsSync(filePath)) {
+      // 見つかった場合
+      res.sendFile(filePath);
+  } else {
+      // 見つからない場合
+      console.log(`   └─ ❌ 見つかりませんでした！`);
+      res.status(404).send('Not Found');
   }
-
-  const url = `/images/${encodeURIComponent(fileName)}`;
-  res.redirect(302, url);
 });
 
-// 画像配信
-app.use('/images', express.static(IMAGES_DIR, {
-  setHeaders(res) { res.set('Cache-Control', 'public, max-age=3600, must-revalidate'); }
-}));
+// 画像フォルダ配信
+app.use('/images', express.static(IMAGES_DIR));
 
-// 静的ファイル（HTML/JS）
-// ※ publicフォルダの中身も認証が必要になります
-app.use(express.static(path.join(__dirname, 'public'), {
-  setHeaders(res, filePath) {
-    if (path.basename(filePath) === 'metadata.json') {
-      res.setHeader('Cache-Control', 'no-store');
-    } else {
-      res.setHeader('Cache-Control', 'public, max-age=3600, must-revalidate');
-    }
-  }
-}));
+// 静的ファイル
+app.use(express.static(path.join(__dirname, 'public')));
 
 // サーバー起動
-function getLocalIp() {
-  const os = require('os');
-  const nics = os.networkInterfaces();
-  for (const nic of Object.values(nics)) {
-    for (const iface of nic || []) {
-      if (iface && iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('169.254')) {
-        return iface.address;
-      }
-    }
-  }
-  return 'localhost';
-}
-const ip = getLocalIp();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server running at: http://${ip}:${PORT}/`);
-  console.log(`   (Monitoring images at: ${IMAGES_DIR})`);
+  console.log(`\n===========================================`);
+  console.log(`🚀 サーバー起動: http://localhost:${PORT}`);
+  console.log(`📂 画像フォルダ: ${IMAGES_DIR}`);
+  console.log(`===========================================\n`);
 });
