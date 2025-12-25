@@ -25,6 +25,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
   const savedQuery = params.get('q');
   const searchInput = document.getElementById('search');
+　const savedSort = localStorage.getItem('savedSortMode');
+  const sortSelect = document.getElementById('sort-select');
+  if (savedSort && sortSelect) {
+      sortSelect.value = savedSort;
+  }
 
   if (savedQuery && searchInput) {
       searchInput.value = savedQuery;
@@ -123,7 +128,11 @@ function applyFilterAndSort() {
   renderGalleryView();
 }
 
-function changeSort() { applyFilterAndSort(); }
+function changeSort() { 
+  const val = document.getElementById('sort-select').value;
+  localStorage.setItem('savedSortMode', val); // 設定を保存
+  applyFilterAndSort(); 
+}
 function filterImages() { applyFilterAndSort(); }
 
 function searchTag(tagName) {
@@ -490,3 +499,41 @@ function clearSearch() {
       if (btn) btn.style.display = 'none';
   }
 }
+
+function navigatePost(step) {
+  // 詳細画面が開いていない、またはデータがない場合は無視
+  if (!currentItem || displayData.length === 0) return;
+
+  // 現在表示中の画像が、今のリスト(displayData)の何番目かを探す
+  // ※ allDataではなくdisplayDataを使うことで、検索結果の中だけで移動できます
+  const currentIndex = displayData.findIndex(d => d.title === currentItem.title);
+
+  if (currentIndex === -1) return; // エラー回避
+
+  const newIndex = currentIndex + step;
+
+  // リストの範囲内であれば移動する
+  if (newIndex >= 0 && newIndex < displayData.length) {
+    openPost(displayData[newIndex]);
+  } else {
+    // 端まで来たときの通知（お好みで消してもOK）
+    console.log('これ以上移動できません');
+  }
+}
+
+// キーボード操作の追加 (← / →)
+document.addEventListener('keydown', (e) => {
+  const postView = document.getElementById('post-view');
+  
+  // 詳細画面が表示されていない(activeクラスがない)ときは何もしない
+  if (!postView.classList.contains('active')) return;
+
+  // タグ入力中などに反応しないようにする
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+  if (e.key === 'ArrowLeft') {
+    navigatePost(-1); // 前へ
+  } else if (e.key === 'ArrowRight') {
+    navigatePost(1);  // 次へ
+  }
+});

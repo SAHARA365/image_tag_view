@@ -114,6 +114,8 @@ app.post('/login', (req, res) => {
     }
 });
 
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
 app.get('/logout', (req, res) => {
     req.session.destroy();
     res.redirect('/login');
@@ -121,9 +123,6 @@ app.get('/logout', (req, res) => {
 
 // ★★★ ここから認証必須 ★★★
 app.use(checkAuth);
-
-// ===== API =====
-app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 app.get('/api/metadata', (_req, res) => {
   res.set('Cache-Control', 'no-store');

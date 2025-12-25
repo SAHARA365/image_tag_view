@@ -152,7 +152,12 @@
     </div>
   </aside>
 
-  <main class="main-content">
+<main class="main-content">
+    
+    <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+      <button onclick="navigatePost(-1)">← Prev</button>
+      <button onclick="navigatePost(1)">Next →</button>
+    </div>
     <div id="image-title" style="margin-bottom:10px; font-weight:bold; color:#555;"></div>
     <img id="main-image" src="" alt="">
   </main>
