@@ -103,21 +103,46 @@ async function loadData() {
   }
 }
 
-// ----------------------------------------------------
-// コアロジック (フィルタ・ソート)
-// ----------------------------------------------------
-
 function applyFilterAndSort() {
   const searchBox = document.getElementById('search');
-  const keyword = searchBox ? searchBox.value.toLowerCase() : '';
+  const val = searchBox ? searchBox.value.toLowerCase() : '';
+  
+  // 空白で区切って複数のキーワードに対応
+  const keywords = val.split(/\s+/).filter(k => k.length > 0);
+
   const sortMode = document.getElementById('sort-select').value;
 
   let filtered = allData.filter(item => {
-    const tagString = (item.tags || []).map(t => typeof t === 'string' ? t : t.name).join(' ');
-    const text = (item.title + ' ' + tagString).toLowerCase();
-    return text.includes(keyword);
+    // 画像が持っているタグ情報
+    const itemTags = item.tags || [];
+
+    // すべてのキーワード条件を満たすか (AND検索)
+    return keywords.every(k => {
+      
+      // ★ ここが新機能：コロンが含まれていたら「分類指定検索」モード
+      if (k.includes(':')) {
+        const separatorIdx = k.indexOf(':');
+        const qType = k.substring(0, separatorIdx); // 検索したいタイプ (例: character)
+        const qName = k.substring(separatorIdx + 1); // 検索したい名前 (例: 初音ミク)
+
+        // その画像の中に、タイプと名前が完全一致するタグがあるか探す
+        return itemTags.some(t => {
+          const tName = typeof t === 'string' ? t : t.name;
+          const tType = typeof t === 'string' ? 'general' : t.type;
+          return tName.toLowerCase() === qName && tType === qType;
+        });
+
+      } else {
+        // ★ コロンがない場合：従来どおり「文字が含まれているか」の検索
+        // タイトルや全タグ名を繋げた文字列から探す
+        const tagString = itemTags.map(t => typeof t === 'string' ? t : t.name).join(' ');
+        const text = (item.title + ' ' + tagString).toLowerCase();
+        return text.includes(k);
+      }
+    });
   });
 
+  // --- ソート処理（変更なし） ---
   if (sortMode === 'date-desc') filtered.sort((a, b) => b.createdAt - a.createdAt);
   else if (sortMode === 'date-asc') filtered.sort((a, b) => a.createdAt - b.createdAt);
   else if (sortMode === 'name-asc') filtered.sort((a, b) => a.title.localeCompare(b.title));
@@ -152,10 +177,6 @@ function changePage(delta) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 }
-
-// ----------------------------------------------------
-// 表示関連 (ギャラリー)
-// ----------------------------------------------------
 
 function showGallery() {
   if (window.location.hash) history.pushState(null, null, ' ');
@@ -300,7 +321,6 @@ function renderSidebarTags(item) {
       li.style.alignItems = 'center';
       li.style.marginBottom = '4px';
 
-      // ★追加: チェックボックス
       li.innerHTML = `
         <label style="display:flex; align-items:center; cursor:pointer; flex-grow:1;">
           <input type="checkbox" class="tag-selector" value="${tagObj.name}" 
@@ -309,7 +329,11 @@ function renderSidebarTags(item) {
             ${tagObj.name} <span style="color:#888; font-size:0.8em;">(${count})</span>
           </a>
         </label>
-        <span class="remove-btn" onclick="removeTag('${tagObj.name}')" style="margin-left:5px; cursor:pointer;">×</span>
+        
+        <span class="edit-btn" onclick="renameTagUI('${tagObj.name}')" 
+              style="margin-left:5px; cursor:pointer; color:#006ffa; font-weight:bold;" title="タグ名を変更">✎</span>
+        <span class="remove-btn" onclick="removeTag('${tagObj.name}')" 
+              style="margin-left:8px; cursor:pointer; color:#d00;" title="削除">×</span>
       `;
       ul.appendChild(li);
     });
@@ -351,13 +375,32 @@ async function deleteSelectedTags() {
 }
 
 // 個別タグ追加・削除
-async function addCurrentTag() {
+  async function addCurrentTag() {
   const nameInput = document.getElementById('new-tag-name');
   const typeInput = document.getElementById('new-tag-type');
-  const name = nameInput.value.trim();
-  const type = typeInput.value;
+  
+  let name = nameInput.value.trim();
+  let type = typeInput.value;
+
   if (!name || !currentItem) return;
 
+  // ★修正追加: 「type:name」の形式だったら自動分割する
+  if (name.includes(':')) {
+    const parts = name.split(':');
+    const detectedType = parts[0];
+    const realName = parts.slice(1).join(':'); // コロン以降を名前にする
+
+    // プレフィックスが有効なタイプ名なら、それを採用する
+    if (['general', 'artist', 'copyright', 'character', 'meta', 'size'].includes(detectedType)) {
+      type = detectedType; // プルダウンの選択に関わらず、正しいタイプで上書き
+      name = realName;     // 名前からプレフィックスを除去
+      
+      // 見た目のプルダウンも合わせておくと親切
+      typeInput.value = type;
+    }
+  }
+
+  // --- 以降は元のまま ---
   const currentTags = (currentItem.tags || []).map(t => typeof t === 'string' ? t : t.name);
   if (currentTags.includes(name)) { alert('既に登録されています'); return; }
 
@@ -365,7 +408,10 @@ async function addCurrentTag() {
   if (name !== UNTAGGED_LABEL) {
     newTags = newTags.filter(t => t.name !== UNTAGGED_LABEL);
   }
-  newTags.push({ name: name, type: type });
+  
+  // ここで prefix が取れた綺麗な name が入ります
+  newTags.push({ name: name, type: type }); 
+  
   currentItem.tags = newTags;
   
   await saveMetadata(currentItem);
@@ -394,18 +440,41 @@ async function saveMetadata(item) {
 
 function updateTagList() {
   const tagCounts = {};
+
+  // 1. 「分類:名前」の形式で集計する
   allData.forEach(item => {
     (item.tags || []).forEach(t => {
       const tagName = typeof t === 'string' ? t : t.name;
-      tagCounts[tagName] = (tagCounts[tagName] || 0) + 1;
+      const tagType = typeof t === 'string' ? 'general' : t.type;
+      
+      // キーを "character:初音ミク" のように作る
+      const key = `${tagType}:${tagName}`;
+      tagCounts[key] = (tagCounts[key] || 0) + 1;
     });
   });
+
+  // 2. datalist (候補) を生成
   const datalist = document.getElementById('tag-suggestions');
   datalist.innerHTML = '';
-  Object.keys(tagCounts).sort().forEach(tag => {
+
+  Object.keys(tagCounts).sort().forEach(key => {
+    // key は "character:初音ミク" なので、分解して表示用ラベルを作る
+    // keyの最初のコロンで分割
+    const separatorIdx = key.indexOf(':');
+    const type = key.substring(0, separatorIdx);
+    const name = key.substring(separatorIdx + 1);
+
+    const count = tagCounts[key];
+    const typeLabel = TAG_LABELS[type] || type; // "character" -> "キャラクター"
+
     const option = document.createElement('option');
-    option.value = tag;
-    option.label = `${tag} (${tagCounts[tag]})`;
+    
+    // ▼ 入力欄に入る値 (例: "character:初音ミク")
+    option.value = key; 
+    
+    // ▼ ドロップダウンでの見た目 (例: "初音ミク (キャラクター) : 5")
+    option.label = `${name} (${typeLabel}) : ${count}`;
+    
     datalist.appendChild(option);
   });
 }
@@ -461,8 +530,23 @@ function deselectAll() {
 async function applyBulkTag() {
   const nameInput = document.getElementById('bulk-tag-name');
   const typeInput = document.getElementById('bulk-tag-type');
-  const tagName = nameInput.value.trim();
-  const tagType = typeInput.value;
+  
+  let tagName = nameInput.value.trim();
+  let tagType = typeInput.value;
+
+  // ★修正追加: 「type:name」の自動分割
+  if (tagName.includes(':')) {
+    const parts = tagName.split(':');
+    const detectedType = parts[0];
+    const realName = parts.slice(1).join(':');
+
+    if (['general', 'artist', 'copyright', 'character', 'meta', 'size'].includes(detectedType)) {
+      tagType = detectedType;
+      tagName = realName;
+      typeInput.value = tagType; // プルダウンも連動
+    }
+  }
+
   if (!tagName || selectedItems.size === 0) return;
 
   for (const title of selectedItems) {
@@ -484,6 +568,60 @@ async function applyBulkTag() {
   updateBulkPanel();
   renderGalleryView();
   updateTagList();
+}
+
+async function removeBulkTag() {
+  const nameInput = document.getElementById('bulk-tag-name');
+  let tagName = nameInput.value.trim();
+  
+  // ★修正追加: 削除時も「type:name」の形式だったら、分類部分をカットして名前だけにする
+  if (tagName.includes(':')) {
+    const parts = tagName.split(':');
+    const detectedType = parts[0];
+    const realName = parts.slice(1).join(':');
+
+    // 既定の分類プレフィックスが付いている場合のみカットする
+    if (['general', 'artist', 'copyright', 'character', 'meta', 'size'].includes(detectedType)) {
+      tagName = realName;
+    }
+  }
+
+  // 入力が空、または何も選択されていない場合は何もしない
+  if (!tagName || selectedItems.size === 0) return;
+
+  // 確認ダイアログ
+  if (!confirm(`選択した ${selectedItems.size} 枚の画像からタグ「${tagName}」を削除しますか？`)) return;
+
+  let changedCount = 0;
+
+  for (const title of selectedItems) {
+    const item = allData.find(d => d.title === title);
+    if (!item) continue;
+    
+    // 現在のタグリストから名前を抽出してチェック
+    const currentTags = (item.tags || []).map(t => typeof t === 'string' ? t : t.name);
+    
+    if (currentTags.includes(tagName)) {
+      // フィルタリングして削除（名前が一致するものを消す）
+      item.tags = (item.tags || []).filter(t => {
+        const tName = typeof t === 'string' ? t : t.name;
+        return tName !== tagName;
+      });
+
+      await saveMetadata(item);
+      changedCount++;
+    }
+  }
+
+  if (changedCount > 0) {
+    alert(`${changedCount} 枚の画像から「${tagName}」を削除しました。`);
+    // 画面更新
+    updateBulkPanel();
+    renderGalleryView();
+    updateTagList();
+  } else {
+    alert(`選択された画像の中に、タグ「${tagName}」は見つかりませんでした。`);
+  }
 }
 
 function clearSearch() {
@@ -537,3 +675,67 @@ document.addEventListener('keydown', (e) => {
     navigatePost(1);  // 次へ
   }
 });
+
+// script.js に追加
+
+// UIからの呼び出し用：リネーム処理
+async function renameTagUI(oldName) {
+  const newName = prompt(`タグ「${oldName}」の新しい名前を入力してください:\n\n※空欄でキャンセル`, oldName);
+  if (!newName || newName === oldName) return;
+
+  // 全画像置換か、この画像だけかを確認
+  const mode = confirm(
+    `「${oldName}」を「${newName}」に変更しますか？\n\n` +
+    `[OK]  → 全画像のタグを一括変更 (DB全体)\n` +
+    `[キャンセル] → 表示中のこの画像のみ変更`
+  );
+
+  if (mode) {
+    // 全画像一括変更 (サーバーAPIを呼ぶ)
+    try {
+      const res = await fetch('/api/tags/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldName, newName })
+      });
+      const data = await res.json();
+      alert(`${data.count} 件の画像を更新しました。`);
+      
+      // データ再読み込みして画面更新
+      await loadData();
+      
+      // もし現在表示中の画像にもそのタグがあれば、currentも更新されているので再取得
+      if (currentItem) {
+        currentItem = allData.find(d => d.title === currentItem.title);
+        renderSidebarTags(currentItem);
+      }
+      updateTagList(); // 候補リストも更新
+    } catch (e) {
+      console.error(e);
+      alert('リネームに失敗しました');
+    }
+  } else {
+    // この画像のみ変更 (ローカル配列操作 + saveMetadata)
+    if (!currentItem) return;
+    
+    // 重複チェック
+    const existingNames = currentItem.tags.map(t => typeof t === 'string' ? t : t.name);
+    if (existingNames.includes(newName)) {
+      alert('変更後のタグ名は既にこの画像に存在します。');
+      return;
+    }
+
+    currentItem.tags = currentItem.tags.map(t => {
+      const tName = typeof t === 'string' ? t : t.name;
+      const tType = typeof t === 'string' ? 'general' : t.type;
+      if (tName === oldName) {
+        return { name: newName, type: tType };
+      }
+      return t;
+    });
+
+    await saveMetadata(currentItem);
+    renderSidebarTags(currentItem);
+    updateTagList();
+  }
+}

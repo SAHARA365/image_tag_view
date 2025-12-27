@@ -104,8 +104,11 @@
         <option value="meta">メタ</option>
         <option value="size">サイズ</option>
       </select>
-      <input type="text" id="bulk-tag-name" placeholder="タグ追加..." list="tag-suggestions" style="width:120px; padding:4px;" onkeydown="if(event.key==='Enter') applyBulkTag()">
+      <input type="text" id="bulk-tag-name" placeholder="タグ追加..." list="tag-suggestions" 
+       style="width:250px; padding:4px;" 
+       onkeydown="if(event.key==='Enter') applyBulkTag()">
       <button onclick="applyBulkTag()" style="background:#006ffa; color:white; border:none; font-weight:bold;">追加</button>
+      <button onclick="removeBulkTag()" style="background:#d9534f; color:white; border:none; font-weight:bold; margin-left:5px;">削除</button>
     </div>
   </div>
   <div>
@@ -132,8 +135,9 @@
     <button onclick="showGallery()" style="width:100%; margin-bottom:15px; padding:8px; cursor:pointer;">← 一覧に戻る</button>
     <div class="edit-box">
       <h4>タグ追加</h4>
-      <input type="text" id="new-tag-name" placeholder="タグ名" style="width: 60%" 
-             onkeydown="if(event.key==='Enter') addCurrentTag()" list="tag-suggestions" autocomplete="off">
+      <input type="text" id="new-tag-name" placeholder="タグ名" 
+       style="width: 100%; box-sizing: border-box; margin-bottom: 5px;" 
+       onkeydown="if(event.key==='Enter') addCurrentTag()" list="tag-suggestions" autocomplete="off">
       <select id="new-tag-type">
         <option value="general">一般</option>
         <option value="artist">絵師</option>

@@ -1,27 +1,17 @@
-// server.js — 最終デバッグ版
+// server.js — リネーム機能追加済み・完全版
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const cookieParser = require('cookie-parser');
 const session = require('express-session');
 
-const app = express(); // ★ここで app を作成（これより前で app.use してはいけません）
-
-// ▼▼▼ 全アクセス監視ログ（ここなら大丈夫です） ▼▼▼
-app.use((req, res, next) => {
-  // 画像以外のアクセスも全て表示して、接続を確認する
-  if (!req.url.startsWith('/images/')) {
-      console.log(`[アクセスあり] ${req.method} ${req.url}`);
-  }
-  next();
-});
-// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+const app = express();
 
 // ▼▼▼ 設定エリア ▼▼▼
 const MY_PASSWORD = '1hiedaAQ'; 
 const SESSION_SECRET = 'secret_key_image_tag_view'; 
 const METADATA_PATH = path.join(__dirname, 'metadata.json');
-const IMAGES_DIR = path.join(__dirname, 'images'); // 画像フォルダの場所
+const IMAGES_DIR = path.join(__dirname, 'images'); 
 // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 // .avif 用 MIME
@@ -42,7 +32,6 @@ function loadMetadataWithPages() {
   let changed = false;
   try {
     if (!fs.existsSync(IMAGES_DIR)) {
-        // 画像フォルダが無い場合は警告を出す
         console.error(`[致命的エラー] 画像フォルダが見つかりません: ${IMAGES_DIR}`);
         return metadata;
     }
@@ -145,7 +134,41 @@ app.put('/api/metadata/:title', (req, res) => {
   }
 });
 
-// ▼▼▼ 画像取得API (詳細診断ログ付き) ▼▼▼
+// ▼▼▼ 追加したリネームAPI ▼▼▼
+app.post('/api/tags/rename', (req, res) => {
+  const { oldName, newName } = req.body;
+  if (!oldName || !newName) return res.status(400).json({ error: 'Invalid names' });
+
+  let metadata = loadMetadataWithPages();
+  let changedCount = 0;
+
+  Object.values(metadata).forEach(item => {
+    if (!item.tags) return;
+    
+    let itemChanged = false;
+    item.tags = item.tags.map(tag => {
+      const tName = typeof tag === 'string' ? tag : tag.name;
+      const tType = typeof tag === 'string' ? 'general' : tag.type;
+
+      if (tName === oldName) {
+        itemChanged = true;
+        return { name: newName, type: tType };
+      }
+      return tag;
+    });
+
+    if (itemChanged) changedCount++;
+  });
+
+  if (changedCount > 0) {
+    fs.writeFileSync(METADATA_PATH, JSON.stringify(metadata, null, 2));
+  }
+
+  console.log(`[タグリネーム] ${oldName} -> ${newName} (${changedCount}件)`);
+  res.json({ ok: true, count: changedCount });
+});
+// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
 app.get('/api/cover-image', (req, res) => {
   const fileName = String(req.query?.folder || req.query?.title || '');
   if (!fileName) return res.status(404).send('No Filename');
@@ -153,24 +176,14 @@ app.get('/api/cover-image', (req, res) => {
   const safeName = path.basename(fileName);
   const filePath = path.join(IMAGES_DIR, safeName);
 
-  // ★ここで黒い画面に報告します
-  console.log(`[画像読込] ${safeName} を探します`);
-  console.log(`   └─ 場所: ${filePath}`);
-
   if (fs.existsSync(filePath)) {
-      // 見つかった場合
       res.sendFile(filePath);
   } else {
-      // 見つからない場合
-      console.log(`   └─ ❌ 見つかりませんでした！`);
       res.status(404).send('Not Found');
   }
 });
 
-// 画像フォルダ配信
 app.use('/images', express.static(IMAGES_DIR));
-
-// 静的ファイル
 app.use(express.static(path.join(__dirname, 'public')));
 
 // サーバー起動
